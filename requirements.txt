@@ -1,0 +1,8 @@
+torch
+z3-solver
+redis
+numpy
+scipy
+ai-scientist
+psutil
+pynvml
