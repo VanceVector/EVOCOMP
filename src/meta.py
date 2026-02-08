@@ -86,6 +86,10 @@ class MetaScientistNiche(EvoManifoldKernel):
         super().__init__(dim)
         self.exploration_threshold = exploration_threshold
         self.successful_experiments: Union[List[torch.Tensor], torch.Tensor] = []
+        # Cache for successful_experiments conversion
+        self._history_cache = None
+        self._history_list_ref = None  # Reference to the list object
+        self._history_len = -1
 
     def forward(self, research_state: ResearchState) -> ResearchAction:
         """
@@ -95,16 +99,59 @@ class MetaScientistNiche(EvoManifoldKernel):
         if isinstance(self.successful_experiments, list):
             if not self.successful_experiments:
                 return ResearchAction.EXPLORE_NOVEL
-            # Ensure elements are tensors
-            tensors = []
-            for t in self.successful_experiments:
-                if not isinstance(t, torch.Tensor):
-                    tensors.append(torch.tensor(t))
-                else:
-                    tensors.append(t)
-            history = torch.stack(tensors)
+
+            current_len = len(self.successful_experiments)
+
+            # Check cache validity (same list object, length >= cached length)
+            # We use 'is' to check for object identity, avoiding ABA problems with id()
+            is_same_list = (self._history_list_ref is self.successful_experiments)
+
+            if is_same_list and current_len == self._history_len and self._history_cache is not None:
+                # Cache hit: exact match
+                history = self._history_cache
+            elif is_same_list and current_len > self._history_len and self._history_cache is not None:
+                # Optimized append: only process new elements
+                new_items = self.successful_experiments[self._history_len:]
+                new_tensors = []
+                for t in new_items:
+                    if not isinstance(t, torch.Tensor):
+                        new_tensors.append(torch.tensor(t))
+                    else:
+                        new_tensors.append(t)
+
+                # Stack new items and concatenate with cache
+                new_block = torch.stack(new_tensors)
+
+                # Ensure device alignment if needed (usually handled by cat but good to be safe)
+                if self._history_cache.device != new_block.device:
+                    new_block = new_block.to(self._history_cache.device)
+
+                history = torch.cat([self._history_cache, new_block])
+
+                # Update cache
+                self._history_cache = history
+                self._history_len = current_len
+            else:
+                # Full rebuild (new list, truncated list, or first run)
+                tensors = []
+                for t in self.successful_experiments:
+                    if not isinstance(t, torch.Tensor):
+                        tensors.append(torch.tensor(t))
+                    else:
+                        tensors.append(t)
+                history = torch.stack(tensors)
+
+                # Update cache
+                self._history_cache = history
+                self._history_list_ref = self.successful_experiments
+                self._history_len = current_len
         else:
             history = self.successful_experiments
+            # Invalidate list cache if switched to tensor
+            self._history_cache = None
+            self._history_list_ref = None
+            self._history_len = -1
+
             if history.numel() == 0:
                 return ResearchAction.EXPLORE_NOVEL
 
