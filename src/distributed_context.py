@@ -11,13 +11,17 @@ class DistributedArchive:
         self.redis = redis_client
         self.node_id = node_id
         self.redis_key = "evocomp:shared_archive:fitnesses"
+        self._local_fitnesses: List[float] = []
 
     @property
     def fitnesses(self) -> List[float]:
         try:
-            # Fetch all items
-            items = self.redis.lrange(self.redis_key, 0, -1)
-            return [float(x) for x in items]
+            # Fetch new items incrementally
+            start_idx = len(self._local_fitnesses)
+            items = self.redis.lrange(self.redis_key, start_idx, -1)
+            new_floats = [float(x) for x in items]
+            self._local_fitnesses.extend(new_floats)
+            return list(self._local_fitnesses)
         except (redis.ConnectionError, TypeError, ValueError):
             return []
 
