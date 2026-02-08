@@ -28,8 +28,8 @@ class EvoManifoldKernel:
 
         # Deterministic projection matrix
         # Use a local generator to ensure reproducibility without affecting global state
-        g = torch.Generator()
-        g.manual_seed(42)
+        # We attempt to create the projection on the same device as the input to avoid transfers.
+        device = flat.device
 
         # Generate projection matrix (dim, n_features)
         # Note: For very large models, this is memory intensive.
@@ -40,14 +40,28 @@ class EvoManifoldKernel:
         # If n_features is huge, this line will OOM.
         # But assuming reasonable model sizes for this environment.
 
-        proj = torch.randn(self.dim, n_features, generator=g) / (self.dim ** 0.5)
+        try:
+            g = torch.Generator(device=device)
+            g.manual_seed(42)
+            proj = torch.randn(self.dim, n_features, generator=g, device=device) / (self.dim ** 0.5)
+        except RuntimeError:
+            # Fallback to CPU if OOM occurs on GPU
+            g = torch.Generator(device='cpu')
+            g.manual_seed(42)
+            proj = torch.randn(self.dim, n_features, generator=g, device='cpu') / (self.dim ** 0.5)
 
         # Move to same device
         if flat.device != proj.device:
             # Usually keep proj on CPU to avoid VRAM usage, move flat to CPU
-            flat = flat.cpu()
+            flat = flat.to(proj.device)
 
         embedding = proj @ flat
+
+        # Ensure embedding is returned on the original device
+        # This handles the case where we fell back to CPU but the caller expects GPU
+        if embedding.device != device:
+            embedding = embedding.to(device)
+
         return embedding
 
     def geodesic_distance(self, emb_i: Union[torch.Tensor, List], emb_j: Union[torch.Tensor, List]) -> float:
