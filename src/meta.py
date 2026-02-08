@@ -1,5 +1,8 @@
 import os
 import torch
+import json
+import urllib.request
+import urllib.error
 from enum import Enum
 from dataclasses import dataclass
 from typing import Any, List, Union
@@ -8,14 +11,80 @@ from .distributed_context import DistributedEvoContext
 
 # Stub for AI-Scientist integration
 class AIScientistAgent:
-    def __init__(self, template_dir, model):
-        pass
+    def __init__(self, template_dir, model="claude-3-opus-20240229"):
+        self.template_dir = template_dir
+        self.model = model
+        self.api_key = os.environ.get("ANTHROPIC_API_KEY")
+        self.api_url = "https://api.anthropic.com/v1/messages"
+
+    def _call_anthropic_api(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Helper method to call Anthropic API.
+        """
+        if not self.api_key:
+            # Fallback/Mock behavior if no API key is present
+            return "Simulated AI Scientist Response (No API Key)"
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+
+        payload = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": user_prompt}
+            ]
+        }
+
+        try:
+            req = urllib.request.Request(
+                self.api_url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+
+            with urllib.request.urlopen(req) as response:
+                if response.status == 200:
+                    result = json.loads(response.read().decode('utf-8'))
+                    # Anthropic response format: {"content": [{"text": "...", "type": "text"}], ...}
+                    content_blocks = result.get("content", [])
+                    if content_blocks and content_blocks[0].get("type") == "text":
+                        return content_blocks[0].get("text", "")
+                    return ""
+                else:
+                    return f"Error: API returned status {response.status}"
+
+        except urllib.error.HTTPError as e:
+            return f"Error calling AI Scientist API: {e.code} {e.reason}"
+        except Exception as e:
+            return f"Error calling AI Scientist API: {str(e)}"
 
     def generate_idea(self, context):
-        return "New Hypothesis"
+        system_prompt = "You are an AI Scientist. Analyze the provided context and generate a novel scientific hypothesis for evolutionary computation."
+
+        # Format context safely
+        try:
+            context_str = json.dumps(context, indent=2, default=str)
+        except Exception:
+            context_str = str(context)
+
+        user_prompt = f"Here is the current experimental context:\n{context_str}\n\nPlease propose a new hypothesis to test."
+
+        return self._call_anthropic_api(system_prompt, user_prompt)
 
     def write_paper(self, idea, results, template):
-        return "Paper Content"
+        system_prompt = "You are an AI Scientist. Write a scientific paper based on the provided hypothesis and experimental results."
+
+        results_str = str(results)
+
+        user_prompt = f"Hypothesis: {idea}\n\nResults: {results_str}\n\nTemplate Style: {template}\n\nPlease write the paper content."
+
+        return self._call_anthropic_api(system_prompt, user_prompt)
 
 class AutomatedEvoComp:
     """
