@@ -1,4 +1,5 @@
 import z3
+import hashlib
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, Tuple
 from .manifold import EvoManifoldKernel
@@ -47,8 +48,12 @@ class GuardVerifier:
         return dist_sq < manifold.anchor_radius**2
 
     def _hash_proof(self, solver):
-        # Stub for proof hashing
-        return "proof_hash_12345"
+        """
+        Generates a SHA256 hash of the solver state for auditability/caching.
+        Uses the SMT2 representation of the solver assertions.
+        """
+        solver_state = solver.to_smt2()
+        return hashlib.sha256(solver_state.encode('utf-8')).hexdigest()
 
     def verify(self, manifold: EvoManifoldKernel, spec: SafetySpec) -> ProofCertificate:
         solver = z3.Solver()
