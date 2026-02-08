@@ -151,7 +151,13 @@ def select_diverse_pair(context, archive: List[nn.Module]) -> Tuple[Optional[nn.
         return (archive[0], archive[0]) if archive else (None, None)
 
     # Vectorized embedding
-    embeddings = torch.stack([context.manifold.embed(m) for m in archive])
+    embeddings = []
+    for m in archive:
+        if not hasattr(m, '_cached_embedding') or m._cached_embedding is None:
+            m._cached_embedding = context.manifold.embed(m)
+        embeddings.append(m._cached_embedding)
+
+    embeddings = torch.stack(embeddings)
 
     # Pairwise distances (N, N)
     dists = torch.cdist(embeddings, embeddings)
