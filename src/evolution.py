@@ -113,16 +113,50 @@ class HighDimEvolution:
 
     def _conjugate_gradient(self, fisher_blocks, advantages):
         # Stub: Real CG implementation would involve solving linear system.
-        # Here we return a dummy natural gradient (scalar) to satisfy the interface logic flow.
+        # Here we return a dummy natural gradient (dict of tensors) to satisfy the interface logic flow.
         # In a real system, this would return a dictionary of parameter updates or a flattened vector.
-        return 0.1
+        updates = {}
+        for name, (A, G) in fisher_blocks.items():
+            # A is (in+1, in+1), G is (out, out)
+            # update shape should be (out, in+1)
+            # We initialize with zeros (dummy update)
+            updates[name] = torch.zeros((G.shape[0], A.shape[0]), device=A.device)
+        return updates
 
-    def _line_search_kl_constraint(self, natural_grad):
+    def _line_search_kl_constraint(self, natural_grad, fisher_blocks, delta=0.01):
         # Analytical step size calculation (Stubbed logic based on description)
         # beta = sqrt(2 delta / (v^T F v))
-        # Assuming delta=0.01 and we calculate v^T F v
-        # Since natural_grad is a dummy 0.1 here, we return a fixed step size.
-        return 0.1
+
+        numerator = 2 * delta
+        denominator = 0.0
+
+        for name, update in natural_grad.items():
+            if name not in fisher_blocks:
+                continue
+
+            A, G = fisher_blocks[name]
+            # update (V) shape: (out, in+1)
+            # A shape: (in+1, in+1)
+            # G shape: (out, out)
+
+            # v^T F v = tr(V^T G V A)
+            # Let M = G @ V @ A
+            # tr(V^T M) = sum(V * M) (elementwise product sum)
+
+            M = G @ update @ A
+            term = torch.sum(update * M)
+            denominator = denominator + term
+
+        # Handle tensor or float
+        val = denominator
+        if isinstance(denominator, torch.Tensor):
+            val = denominator.item()
+
+        if val <= 1e-12:
+            return 1.0  # Safe default if no curvature or zero update
+
+        beta = torch.sqrt(torch.tensor(numerator / val))
+        return beta
 
     def _apply_update(self, update):
         # Stub
@@ -139,9 +173,14 @@ class HighDimEvolution:
         natural_grad = self._conjugate_gradient(fisher_blocks, advantages)
 
         # Trust region constraint : KL < epsilon
-        step_size = self._line_search_kl_constraint(natural_grad)
+        step_size = self._line_search_kl_constraint(natural_grad, fisher_blocks)
 
-        return self._apply_update(natural_grad * step_size)
+        # Scale updates
+        scaled_update = {}
+        for name, grad in natural_grad.items():
+            scaled_update[name] = grad * step_size
+
+        return self._apply_update(scaled_update)
 
 def select_diverse_pair(context, archive: List[nn.Module]) -> Tuple[Optional[nn.Module], Optional[nn.Module]]:
     """
