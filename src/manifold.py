@@ -11,6 +11,8 @@ class EvoManifoldKernel:
         self.dim = dim
         self.manifold_dim = dim
         self.anchor_radius = anchor_radius
+        self._cached_proj = None
+        self._cached_n_features = None
 
     def embed(self, model: nn.Module) -> torch.Tensor:
         """
@@ -26,21 +28,27 @@ class EvoManifoldKernel:
         flat = torch.cat(params)
         n_features = flat.numel()
 
-        # Deterministic projection matrix
-        # Use a local generator to ensure reproducibility without affecting global state
-        g = torch.Generator()
-        g.manual_seed(42)
+        # Check cache
+        if self._cached_n_features == n_features and self._cached_proj is not None:
+            proj = self._cached_proj
+        else:
+            # Deterministic projection matrix
+            # Use a local generator to ensure reproducibility without affecting global state
+            g = torch.Generator()
+            g.manual_seed(42)
 
-        # Generate projection matrix (dim, n_features)
-        # Note: For very large models, this is memory intensive.
-        # A real production system would use sparse projections or structured matrices (e.g. Fastfood transform).
-        # Here we follow the instruction for deterministic random projection.
+            # Generate projection matrix (dim, n_features)
+            # Note: For very large models, this is memory intensive.
+            # A real production system would use sparse projections or structured matrices (e.g. Fastfood transform).
+            # Here we follow the instruction for deterministic random projection.
 
-        # To save memory, we can compute it in chunks if needed, but let's keep it simple for now.
-        # If n_features is huge, this line will OOM.
-        # But assuming reasonable model sizes for this environment.
+            # To save memory, we can compute it in chunks if needed, but let's keep it simple for now.
+            # If n_features is huge, this line will OOM.
+            # But assuming reasonable model sizes for this environment.
 
-        proj = torch.randn(self.dim, n_features, generator=g) / (self.dim ** 0.5)
+            proj = torch.randn(self.dim, n_features, generator=g) / (self.dim ** 0.5)
+            self._cached_proj = proj
+            self._cached_n_features = n_features
 
         # Move to same device
         if flat.device != proj.device:
